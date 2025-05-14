@@ -1,0 +1,353 @@
+.model small
+.stack 100h
+.data
+    ; Messages for user input
+    welcomeMsg      db "BMI CALCULATOR PROGRAM", 0Dh, 0Ah, "$"
+    weightPrompt    db 0Dh, 0Ah, "Enter weight (kg): $"
+    heightPrompt    db 0Dh, 0Ah, "Enter height (cm): $"
+    genderPrompt    db 0Dh, 0Ah, "Enter gender (M/W): $"
+    invalidGender   db 0Dh, 0Ah, "Invalid gender! Please enter M or W only.", 0Dh, 0Ah, "$"
+    errorMsg        db 0Dh, 0Ah, "Error: Invalid input or calculation error!", 0Dh, 0Ah, "$"
+    
+    ; BMI result messages
+    bmiResult       db 0Dh, 0Ah, "Your BMI: $"
+    bmiDecimal      db ".$"
+    
+    ; BMI classification messages (WHO standard)
+    underweightMsg  db 0Dh, 0Ah, "Classification: Underweight", 0Dh, 0Ah, "$"
+    normalMsg       db 0Dh, 0Ah, "Classification: Normal weight", 0Dh, 0Ah, "$"
+    overweightMsg   db 0Dh, 0Ah, "Classification: Overweight", 0Dh, 0Ah, "$"
+    obeseClass1Msg  db 0Dh, 0Ah, "Classification: Obese Class I", 0Dh, 0Ah, "$"
+    obeseClass2Msg  db 0Dh, 0Ah, "Classification: Obese Class II", 0Dh, 0Ah, "$"
+    obeseClass3Msg  db 0Dh, 0Ah, "Classification: Obese Class III", 0Dh, 0Ah, "$"
+    
+    ; Variables for calculation
+    weight          dw 1    ; Weight in kg (default 1 to avoid div by zero)
+    height          dw 1    ; Height in cm (default 1 to avoid div by zero)
+    bmi             dw 0    ; BMI result (integer part)
+    bmiDecimalPart  dw 0    ; BMI decimal part
+    gender          db 'M'  ; 'M' or 'W' (default M)
+    
+    ; Buffer for number input
+    inputBuffer     db 6 dup(0)
+    
+    ; New line
+    newLine         db 0Dh, 0Ah, "$"
+
+.code
+main proc
+    mov ax, @data
+    mov ds, ax
+    
+    ; Display welcome message
+    lea dx, welcomeMsg
+    call printString
+    
+    ; Get weight input
+    lea dx, weightPrompt
+    call printString
+    call readNumber
+    cmp ax, 0        ; Check if weight is zero or invalid
+    jle errorHandler
+    mov weight, ax
+    
+    ; Get height input
+    lea dx, heightPrompt
+    call printString
+    call readNumber
+    cmp ax, 0        ; Check if height is zero or invalid
+    jle errorHandler
+    mov height, ax
+    
+    ; Get gender input with validation
+getGenderInput:
+    lea dx, genderPrompt
+    call printString
+    
+    ; Read single character
+    mov ah, 01h
+    int 21h
+    
+    ; Convert to uppercase if needed
+    cmp al, 'a'
+    jb skipToUpper
+    cmp al, 'z'
+    ja skipToUpper
+    sub al, 32  ; Convert to uppercase
+skipToUpper:
+    
+    ; Validate gender (M or W only)
+    cmp al, 'M'
+    je validGender
+    cmp al, 'W'
+    je validGender
+    
+    ; Invalid gender, prompt again
+    lea dx, invalidGender
+    call printString
+    jmp getGenderInput
+    
+validGender:
+    mov gender, al
+    
+    ; Print newline after gender input
+    lea dx, newLine
+    call printString
+    
+    ; Calculate BMI = weight * 10000 / (height * height)
+    ; We use modified formula to avoid overflow:
+    ; BMI = (10000 / height) * weight / height
+    
+    ; Check for potential division by zero
+    mov bx, height
+    cmp bx, 0
+    je errorHandler
+    
+    ; First part: 10000 / height
+    mov ax, 10000
+    mov dx, 0
+    div bx        ; AX = 10000 / height, DX = remainder
+    
+    ; Multiply by weight
+    mov bx, weight
+    mul bx        ; DX:AX = (10000 / height) * weight
+    
+    ; Check for overflow
+    cmp dx, 0
+    jne errorHandler
+    
+    ; Divide by height again
+    mov bx, height
+    cmp bx, 0     ; Double-check height again
+    je errorHandler
+    
+    div bx        ; AX = BMI (integer part), DX = remainder
+    
+    mov bmi, ax
+    
+    ; Calculate decimal part (for display)
+    mov ax, dx
+    mov bx, 100
+    mul bx        ; AX = remainder * 100
+    
+    mov bx, height
+    div bx        ; AX = decimal part
+    mov bmiDecimalPart, ax
+    
+    ; Display BMI result
+    lea dx, bmiResult
+    call printString
+    
+    ; Display integer part
+    mov ax, bmi
+    call printNumber
+    
+    ; Display decimal point and decimal part
+    lea dx, bmiDecimal
+    call printString
+    mov ax, bmiDecimalPart
+    call printNumber
+    
+    ; Display BMI classification based on WHO standards
+    ; Different standards for males and females
+    mov al, gender
+    cmp al, 'M'
+    je maleBMIClassification
+    
+    ; Female BMI classification
+    mov ax, bmi
+    cmp ax, 18    ; Less than 18.5 (using integer comparison)
+    jl underweight
+    cmp ax, 25    ; 18.5 - 24.9
+    jl normal
+    cmp ax, 30    ; 25 - 29.9
+    jl overweight
+    cmp ax, 35    ; 30 - 34.9
+    jl obeseClass1
+    cmp ax, 40    ; 35 - 39.9
+    jl obeseClass2
+    jmp obeseClass3  ; 40+
+    
+maleBMIClassification:
+    ; Male BMI classification (same thresholds as female according to WHO)
+    mov ax, bmi
+    cmp ax, 18    ; Less than 18.5
+    jl underweight
+    cmp ax, 25    ; 18.5 - 24.9
+    jl normal
+    cmp ax, 30    ; 25 - 29.9
+    jl overweight
+    cmp ax, 35    ; 30 - 34.9
+    jl obeseClass1
+    cmp ax, 40    ; 35 - 39.9
+    jl obeseClass2
+    jmp obeseClass3  ; 40+
+    
+underweight:
+    lea dx, underweightMsg
+    call printString
+    jmp exit
+    
+normal:
+    lea dx, normalMsg
+    call printString
+    jmp exit
+    
+overweight:
+    lea dx, overweightMsg
+    call printString
+    jmp exit
+    
+obeseClass1:
+    lea dx, obeseClass1Msg
+    call printString
+    jmp exit
+    
+obeseClass2:
+    lea dx, obeseClass2Msg
+    call printString
+    jmp exit
+    
+obeseClass3:
+    lea dx, obeseClass3Msg
+    call printString
+    jmp exit
+    
+errorHandler:
+    lea dx, errorMsg
+    call printString
+    
+exit:
+    ; Exit program
+    mov ah, 4Ch
+    int 21h
+main endp
+
+; Procedure to print a string
+printString proc
+    mov ah, 09h
+    int 21h
+    ret
+printString endp
+
+; Procedure to read a number from keyboard
+readNumber proc
+    xor bx, bx       ; Clear BX for accumulation
+    xor cx, cx       ; Clear digit counter
+    
+readLoop:
+    ; Read character
+    mov ah, 01h
+    int 21h
+    
+    ; Check for Enter key
+    cmp al, 13
+    je endReadNumber
+    
+    ; Check if digit
+    cmp al, '0'
+    jb readLoop      ; If below '0', ignore
+    cmp al, '9'
+    ja readLoop      ; If above '9', ignore
+    
+    ; Convert to digit and add to result
+    sub al, '0'
+    xor ah, ah       ; Clear AH
+    
+    ; Save current value
+    push ax
+    
+    ; Multiply current result by 10
+    mov ax, 10
+    mul bx           ; DX:AX = BX * 10
+    
+    ; Check for overflow
+    cmp dx, 0
+    jne readOverflow
+    
+    mov bx, ax       ; BX = old value * 10
+    
+    ; Add new digit
+    pop ax
+    add bx, ax
+    
+    ; Check for overflow or negative value (carry bit)
+    jc readOverflow
+    
+    ; Increment digit counter
+    inc cx
+    cmp cx, 5        ; Max 5 digits
+    jge endReadNumber
+    
+    jmp readLoop
+    
+readOverflow:
+    ; Handle overflow - clear stack and return max value
+    cmp cx, 0
+    je clearStack
+    pop ax
+    
+clearStack:
+    mov bx, 9999     ; Return max safe value
+    jmp endReadNumber
+    
+endReadNumber:
+    mov ax, bx       ; Return value in AX
+    ret
+readNumber endp
+
+; Procedure to print a number
+printNumber proc
+    ; Save registers
+    push bx
+    push cx
+    push dx
+    
+    mov bx, 10       ; Divisor
+    mov cx, 0        ; Digit counter
+    
+    ; Handle zero specially
+    test ax, ax
+    jnz convertLoop
+    mov dl, '0'
+    mov ah, 02h
+    int 21h
+    jmp finishPrintNumber
+    
+convertLoop:
+    ; Check if number is zero
+    test ax, ax
+    jz printLoop
+    
+    ; Divide by 10
+    mov dx, 0
+    div bx           ; AX = quotient, DX = remainder
+    
+    ; Convert remainder to ASCII and push to stack
+    push dx
+    inc cx           ; Increment digit counter
+    
+    jmp convertLoop
+    
+printLoop:
+    ; Pop digits from stack and print
+    test cx, cx
+    jz finishPrintNumber
+    
+    pop dx
+    add dl, '0'      ; Convert to ASCII
+    mov ah, 02h
+    int 21h
+    
+    dec cx
+    jmp printLoop
+    
+finishPrintNumber:
+    ; Restore registers
+    pop dx
+    pop cx
+    pop bx
+    ret
+printNumber endp
+
+end main
